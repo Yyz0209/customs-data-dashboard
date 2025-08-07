@@ -1,16 +1,182 @@
 import os
+import glob
+import time
 import pandas as pd
 import streamlit as st
+from playwright.sync_api import sync_playwright
+from datetime import datetime
 from pyecharts import options as opts
 from pyecharts.charts import Line
 from streamlit_echarts import st_pyecharts
+import asyncio
+import sys
+
+# --- 关键修复：解决在Windows上Streamlit中运行Playwright的兼容性问题 ---
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 
 # --- 配置区 ---
+RAW_DATA_PATH = "raw_csv_data"
 OUTPUT_FILENAME = "海关统计数据汇总.xlsx"
 TARGET_LOCATIONS = ['北京市', '上海市', '深圳市', '南京市', '合肥市', '浙江省']
+BASE_URL = "http://www.customs.gov.cn/customs/302249/zfxxgk/2799825/302274/302277/6348926/index.html"
 
 # =============================================================================
-#  Streamlit 应用主逻辑
+#  第一部分：数据获取函数 (从之前的脚本整合而来)
+# =============================================================================
+def check_and_download_new_data():
+    """检查本地已下载的文件，访问网站，只下载新增月份的原始数据。"""
+    st.write("--- 开始执行数据更新检查 ---")
+    os.makedirs(RAW_DATA_PATH, exist_ok=True)
+    
+    existing_files = set(os.listdir(RAW_DATA_PATH))
+    st.write(f"本地已存在 {len(existing_files)} 个数据文件。")
+
+    new_files_downloaded = 0
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True) # 改为无头模式，不在Streamlit中显示浏览器
+        context = browser.new_context(user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.84 Safari/537.36')
+        page = context.new_page()
+        
+        try:
+            current_year = datetime.now().year
+            for year in range(2024, current_year + 1):
+                try:
+                    status_text.text(f"正在检查年份: {year}...")
+                    page.goto(BASE_URL, timeout=60000)
+                    page.wait_for_selector("//div[@class='customs-foot']", timeout=30000)
+
+                    year_button_selector = f"//a[contains(text(), '{year}')]"
+                    page.wait_for_selector(year_button_selector, timeout=20000).click()
+                    time.sleep(3)
+
+                    table_row_selector = "//tr[contains(., '进出口商品收发货人所在地总值表')]"
+                    row = page.wait_for_selector(table_row_selector, timeout=20000)
+
+                    new_months_to_download = []
+                    valid_month_links = [link for link in row.query_selector_all("a") if link.get_attribute('href')]
+                    for link in valid_month_links:
+                        month_text = link.inner_text()
+                        if "月" in month_text:
+                            month_number = int(month_text.replace("月", "").strip())
+                            filename_to_check = f"{year}-{month_number:02d}.csv"
+                            if filename_to_check not in existing_files:
+                                new_months_to_download.append(month_text)
+                    
+                    if not new_months_to_download:
+                        status_text.text(f"{year} 年未发现需要下载的新数据。")
+                        continue
+                    
+                    total_new = len(new_months_to_download)
+                    for i, month_text in enumerate(new_months_to_download):
+                        status_text.text(f"发现新数据，正在下载: {month_text}...")
+                        
+                        month_link_selector = f"//tr[contains(., '进出口商品收发货人所在地总值表')]//a[text()='{month_text}']"
+                        page.wait_for_selector(month_link_selector).click()
+                        
+                        with context.expect_page() as new_page_info:
+                            detail_page = new_page_info.value
+                        
+                        detail_page.wait_for_load_state(timeout=60000)
+                        
+                        table_container_selector = "div.easysite-news-text"
+                        detail_page.wait_for_selector(table_container_selector, timeout=20000)
+                        table_html = detail_page.locator(table_container_selector).inner_html()
+                        
+                        dataframes = pd.read_html(table_html, header=[0, 1])
+                        
+                        if dataframes:
+                            df = dataframes[0]
+                            month_number = int(month_text.replace("月", "").strip())
+                            filename_to_save = f"{year}-{month_number:02d}.csv"
+                            file_path = os.path.join(RAW_DATA_PATH, filename_to_save)
+                            df.to_csv(file_path, index=False, encoding='utf-8-sig')
+                            status_text.text(f"新数据已保存至: {file_path}")
+                            new_files_downloaded += 1
+                        
+                        detail_page.close()
+                        time.sleep(2)
+                        progress_bar.progress((i + 1) / total_new)
+
+                except Exception as e:
+                    st.error(f"处理年份 {year} 时出错: {e}")
+                    continue
+        finally:
+            browser.close()
+    
+    status_text.text("数据更新检查完成！")
+    progress_bar.empty()
+    return new_files_downloaded
+
+# =============================================================================
+#  第二部分：数据处理函数 (从之前的脚本整合而来)
+# =============================================================================
+def process_all_data():
+    """处理所有本地的原始数据，生成最终的Excel报告。"""
+    st.write("\n--- 开始执行数据处理与整合 ---")
+    all_csv_files = glob.glob(os.path.join(RAW_DATA_PATH, "*.csv"))
+    if not all_csv_files:
+        st.error(f"错误：在 '{RAW_DATA_PATH}' 文件夹中未找到任何CSV文件。")
+        return
+
+    st.write(f"找到 {len(all_csv_files)} 个原始数据文件进行处理...")
+    
+    all_processed_rows = []
+    for file_path in all_csv_files:
+        try:
+            filename = os.path.basename(file_path)
+            year, month = map(int, filename.replace('.csv', '').split('-'))
+            data_time = f"{year}-{month:02d}"
+            
+            df = pd.read_csv(file_path, header=1)
+            df.drop(index=0, inplace=True)
+            df['时间'] = data_time
+            
+            required_cols_df = df.iloc[:, [0, 1, 3, 5, -1]].copy()
+            required_cols_df.columns = ['地区', '进出口', '进口', '出口', '时间']
+            
+            filtered_df = required_cols_df[required_cols_df['地区'].isin(TARGET_LOCATIONS)]
+            all_processed_rows.append(filtered_df)
+        except Exception as e:
+            st.warning(f"处理文件 {file_path} 时出错: {e}")
+            continue
+
+    if not all_processed_rows:
+        st.error("未能处理任何数据，程序终止。")
+        return
+
+    master_df = pd.concat(all_processed_rows, ignore_index=True)
+
+    for col in ['进出口', '进口', '出口']:
+        master_df[col] = pd.to_numeric(master_df[col], errors='coerce')
+
+    master_df['时间'] = pd.to_datetime(master_df['时间'])
+    master_df.sort_values(by=['地区', '时间'], inplace=True)
+
+    for col in ['进出口', '进口', '出口']:
+        yoy_col_name = f'{col}同比'
+        master_df[yoy_col_name] = master_df.groupby('地区')[col].pct_change(12)
+
+    with pd.ExcelWriter(OUTPUT_FILENAME, engine='openpyxl') as writer:
+        for location in TARGET_LOCATIONS:
+            location_df = master_df[master_df['地区'] == location].copy()
+            if not location_df.empty:
+                location_df['时间'] = location_df['时间'].dt.strftime('%Y-%m')
+                final_columns_order = ['时间', '进出口', '进出口同比', '进口', '进口同比', '出口', '出口同比']
+                for col in final_columns_order:
+                    if col not in location_df.columns:
+                        location_df[col] = None
+                location_df = location_df[final_columns_order]
+                location_df.to_excel(writer, sheet_name=location, index=False)
+    
+    st.success(f"数据处理与整合完成！最终报告已更新: {OUTPUT_FILENAME}")
+
+# =============================================================================
+#  第三部分：Streamlit 应用主逻辑
 # =============================================================================
 st.set_page_config(page_title="海关进出口数据看板", layout="wide")
 
@@ -60,6 +226,16 @@ def format_metric_delta(yoy_value):
 # --- 侧边栏 ---
 st.sidebar.header("操作面板")
 
+if st.sidebar.button("刷新数据"):
+    with st.spinner("正在检查并下载新数据，请稍候..."):
+        new_files_count = check_and_download_new_data()
+    
+    if new_files_count > 0:
+        with st.spinner("检测到新文件，正在重新处理所有数据..."):
+            process_all_data()
+            st.cache_data.clear()
+    else:
+        st.sidebar.info("数据已是最新，无需处理。")
 
 # --- 主页面 ---
 data = load_data()
@@ -88,19 +264,19 @@ if data:
                         label=f"进出口",
                         value=f"{latest_data['进出口']:,}",
                         delta=format_metric_delta(latest_data['进出口同比']),
-                        delta_color="inverse" # 正为红，负为绿
+                        delta_color="inverse" # 核心改动：正为红，负为绿
                     )
                     st.metric(
                         label=f"进口",
                         value=f"{latest_data['进口']:,}",
                         delta=format_metric_delta(latest_data['进口同比']),
-                        delta_color="inverse" # 正为红，负为绿
+                        delta_color="inverse" # 核心改动：正为红，负为绿
                     )
                     st.metric(
                         label=f"出口",
                         value=f"{latest_data['出口']:,}",
                         delta=format_metric_delta(latest_data['出口同比']),
-                        delta_color="inverse" # 正为红，负为绿
+                        delta_color="inverse" # 核心改动：正为红，负为绿
                     )
             else:
                  with col:
@@ -115,7 +291,7 @@ if data:
     )
     
     st.header(f"{selected_location} - 数据详情")
-    st.caption("人民币值：亿元") # 在表格旁标注单位
+    st.caption("人民币值：万元") # 核心改动：更新单位
     
     location_df = data.get(selected_location)
     
@@ -126,7 +302,7 @@ if data:
             if col in display_df.columns:
                 display_df[col] = display_df[col].apply(lambda x: f"{x:.2%}" if pd.notna(x) else 'N/A')
 
-        # 显示表格，使用容器宽度，并隐藏索引列
+        # 核心改动：显示表格时隐藏索引列
         st.dataframe(display_df.sort_values(by="时间", ascending=False), use_container_width=True, hide_index=True)
         
         # --- 使用 Pyecharts 绘制图表 ---
@@ -162,7 +338,7 @@ if data:
                 tooltip_opts=opts.TooltipOpts(trigger="axis"),
                 toolbox_opts=opts.ToolboxOpts(is_show=True),
                 xaxis_opts=opts.AxisOpts(type_="category", boundary_gap=False),
-                yaxis_opts=opts.AxisOpts(name="人民币值：亿元"), # 为Y轴添加单位
+                yaxis_opts=opts.AxisOpts(name="人民币值：万元"), # 核心改动：更新Y轴单位
                 legend_opts=opts.LegendOpts(orient="horizontal", pos_left="center")
             )
         )
@@ -174,3 +350,4 @@ if data:
         st.warning(f"未找到 '{selected_location}' 的数据。")
 else:
     st.info("本地没有数据文件。请手动运行 '自动更新数据.py' 脚本来获取数据。")
+
