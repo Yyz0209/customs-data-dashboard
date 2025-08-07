@@ -223,17 +223,6 @@ def format_delta_for_metric(yoy_value):
 # --- 侧边栏 ---
 st.sidebar.header("操作面板")
 
-if st.sidebar.button("刷新数据"):
-    with st.spinner("正在检查并下载新数据，请稍候..."):
-        new_files_count = check_and_download_new_data()
-    
-    if new_files_count > 0:
-        with st.spinner("检测到新文件，正在重新处理所有数据..."):
-            process_all_data()
-            st.cache_data.clear()
-    else:
-        st.sidebar.info("数据已是最新，无需处理。")
-
 # --- 主页面 ---
 data = load_data()
 
