@@ -213,15 +213,12 @@ def load_data():
         st.error(f"加载Excel文件失败: {e}")
         return None
 
-# --- 美化函数 ---
-def format_metric_delta(yoy_value):
-    """格式化指标卡片的同比数据"""
+# --- 核心改动：新的美化函数 ---
+def format_delta_for_metric(yoy_value):
+    """将小数值格式化为带正负号的百分比字符串，以便st.metric能正确上色和显示。"""
     if pd.isna(yoy_value):
-        return "N/A"
-    
-    arrow = "▲" if yoy_value >= 0 else "▼"
-    formatted_yoy = f"{arrow} {yoy_value:.2%}"
-    return formatted_yoy
+        return None  # 如果没有同比数据，则不显示delta
+    return f"{yoy_value:+.2%}"
 
 # --- 侧边栏 ---
 st.sidebar.header("操作面板")
@@ -263,20 +260,20 @@ if data:
                     st.metric(
                         label=f"进出口",
                         value=f"{latest_data['进出口']:,}",
-                        delta=format_metric_delta(latest_data['进出口同比']),
-                        delta_color="inverse" # 核心改动：正为红，负为绿
+                        delta=format_delta_for_metric(latest_data['进出口同比']),
+                        delta_color="inverse" 
                     )
                     st.metric(
                         label=f"进口",
                         value=f"{latest_data['进口']:,}",
-                        delta=format_metric_delta(latest_data['进口同比']),
-                        delta_color="inverse" # 核心改动：正为红，负为绿
+                        delta=format_delta_for_metric(latest_data['进口同比']),
+                        delta_color="inverse"
                     )
                     st.metric(
                         label=f"出口",
                         value=f"{latest_data['出口']:,}",
-                        delta=format_metric_delta(latest_data['出口同比']),
-                        delta_color="inverse" # 核心改动：正为红，负为绿
+                        delta=format_delta_for_metric(latest_data['出口同比']),
+                        delta_color="inverse"
                     )
             else:
                  with col:
@@ -291,7 +288,7 @@ if data:
     )
     
     st.header(f"{selected_location} - 数据详情")
-    st.caption("人民币值：万元") # 核心改动：更新单位
+    st.caption("人民币值：万元") 
     
     location_df = data.get(selected_location)
     
@@ -302,7 +299,7 @@ if data:
             if col in display_df.columns:
                 display_df[col] = display_df[col].apply(lambda x: f"{x:.2%}" if pd.notna(x) else 'N/A')
 
-        # 核心改动：显示表格时隐藏索引列
+        # 显示表格时隐藏索引列
         st.dataframe(display_df.sort_values(by="时间", ascending=False), use_container_width=True, hide_index=True)
         
         # --- 使用 Pyecharts 绘制图表 ---
@@ -338,7 +335,7 @@ if data:
                 tooltip_opts=opts.TooltipOpts(trigger="axis"),
                 toolbox_opts=opts.ToolboxOpts(is_show=True),
                 xaxis_opts=opts.AxisOpts(type_="category", boundary_gap=False),
-                yaxis_opts=opts.AxisOpts(name="人民币值：万元"), # 核心改动：更新Y轴单位
+                yaxis_opts=opts.AxisOpts(name="人民币值：万元"), 
                 legend_opts=opts.LegendOpts(orient="horizontal", pos_left="center")
             )
         )
