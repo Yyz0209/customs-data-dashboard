@@ -165,27 +165,27 @@ with st.sidebar:
 # --- 主页面 ---
 if data:
     # --- 全国数据概览 ---
-    st.subheader("全国数据概览 (万元)")
+    st.subheader("全国数据概览 (年初至今累计：万元)")
     if national_df is not None and not national_df.empty:
         latest_national_data = national_df.iloc[national_df['时间'].map(pd.to_datetime).idxmax()]
         # 使用Streamlit原生带边框的容器来创建卡片
         with st.container(border=True):
             cols = st.columns(3)
             cols[0].metric(
-                label="进出口 (年初至今)", value=format_value(latest_national_data['进出口_年初至今']),
+                label="进出口", value=format_value(latest_national_data['进出口_年初至今']),
                 delta=format_delta_for_metric(latest_national_data['进出口_年初至今同比']), delta_color="inverse"
             )
             cols[1].metric(
-                label="进口 (年初至今)", value=format_value(latest_national_data['进口_年初至今']),
+                label="出口", value=format_value(latest_national_data['进口_年初至今']),
                 delta=format_delta_for_metric(latest_national_data['进口_年初至今同比']), delta_color="inverse"
             )
             cols[2].metric(
-                label="出口 (年初至今)", value=format_value(latest_national_data['出口_年初至今']),
+                label="进口", value=format_value(latest_national_data['出口_年初至今']),
                 delta=format_delta_for_metric(latest_national_data['出口_年初至今同比']), delta_color="inverse"
             )
 
     # --- 业务地区数据概览 (每个地区一张卡片) ---
-    st.subheader("业务地区数据概览 (万元)")
+    st.subheader("业务地区数据概览 (年初至今累计：万元)")
     locations_to_show = [loc for loc in TARGET_LOCATIONS if loc != '全国']
     
     for location in locations_to_show:
@@ -197,9 +197,9 @@ if data:
             with st.container(border=True):
                 st.subheader(location)
                 cols = st.columns(3)
-                cols[0].metric(label="进出口 (年初至今)", value=format_value(latest_data['进出口_年初至今']), delta=format_delta_for_metric(latest_data['进出口_年初至今同比']), delta_color="inverse")
-                cols[1].metric(label="进口 (年初至今)", value=format_value(latest_data['进口_年初至今']), delta=format_delta_for_metric(latest_data['进口_年初至今同比']), delta_color="inverse")
-                cols[2].metric(label="出口 (年初至今)", value=format_value(latest_data['出口_年初至今']), delta=format_delta_for_metric(latest_data['出口_年初至今同比']), delta_color="inverse")
+                cols[0].metric(label="进出口", value=format_value(latest_data['进出口_年初至今']), delta=format_delta_for_metric(latest_data['进出口_年初至今同比']), delta_color="inverse")
+                cols[1].metric(label="出口", value=format_value(latest_data['进口_年初至今']), delta=format_delta_for_metric(latest_data['进口_年初至今同比']), delta_color="inverse")
+                cols[2].metric(label="进口", value=format_value(latest_data['出口_年初至今']), delta=format_delta_for_metric(latest_data['出口_年初至今同比']), delta_color="inverse")
                 
                 if location == '浙江省':
                     with st.expander("展开/收起浙江省各地市数据"):
@@ -210,8 +210,8 @@ if data:
                                 st.markdown(f"**{city}**")
                                 city_cols = st.columns(3)
                                 city_cols[0].metric(label="进出口", value=format_value(latest_city_data['进出口_年初至今']), delta=format_delta_for_metric(latest_city_data['进出口_年初至今同比']), delta_color="inverse")
-                                city_cols[1].metric(label="进口", value=format_value(latest_city_data['进口_年初至今']), delta=format_delta_for_metric(latest_city_data['进口_年初至今同比']), delta_color="inverse")
-                                city_cols[2].metric(label="出口", value=format_value(latest_city_data['出口_年初至今']), delta=format_delta_for_metric(latest_city_data['出口_年初至今同比']), delta_color="inverse")
+                                city_cols[1].metric(label="出口", value=format_value(latest_city_data['进口_年初至今']), delta=format_delta_for_metric(latest_city_data['进口_年初至今同比']), delta_color="inverse")
+                                city_cols[2].metric(label="进口", value=format_value(latest_city_data['出口_年初至今']), delta=format_delta_for_metric(latest_city_data['出口_年初至今同比']), delta_color="inverse")
                                 if city_index < len(ZHEJIANG_CITIES) -1:
                                     st.markdown("---")
     
